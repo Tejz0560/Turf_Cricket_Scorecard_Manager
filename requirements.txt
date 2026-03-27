@@ -1,10 +1,6 @@
 fastapi
 uvicorn
 pandas
-langgraph
-langchain
-google-generativeai
-groq
 streamlit
 python-dotenv
 plotly
