@@ -1,3 +1,5 @@
+from re import match
+
 import streamlit as st
 from stats_engine import calculate_stats
 
@@ -33,161 +35,114 @@ def display_scorecard(match):
     
     st.markdown("---")
     
-    # Determine if this is first or second innings for the current team
-    is_first_innings = (current_team == match["team1"] and match["innings"] >= 1) or (current_team == match["team2"] and match["innings"] == 2)
-    is_second_innings = (current_team == match["team2"] and match["innings"] == 2)
-    
-    if is_first_innings:
+    # Display innings data as available (single-source-of-truth through ball_log)
+    if match.get("innings", 1) >= 1:
         display_team_batting(match, current_team, 1)
         display_team_bowling(match, current_team, 1)
-    elif is_second_innings:
+
+    if match.get("innings", 1) == 2:
         display_team_batting(match, current_team, 2)
         display_team_bowling(match, current_team, 2)
-    else:
-        st.info(f"{current_team} yet to bat")
     
     st.markdown("---")
 
 
 def display_team_batting(match, team_name, innings):
-    """Display batting scorecard for a specific team and innings"""
-    st.markdown(f"<h3 style='color: #2e7d32;'>🏏 {team_name} - {'1st' if innings == 1 else '2nd'} Innings Batting</h3>", unsafe_allow_html=True)
-    
-    # Get players for this team
+    import pandas as pd
+
+    st.markdown(f"<h3>🏏 {team_name} - {'1st' if innings == 1 else '2nd'} Innings Batting</h3>", unsafe_allow_html=True)
+
     players = match["players1"] if team_name == match["team1"] else match["players2"]
-    
+
     batting_data = []
-    
+
     for player in players:
-        # Get stats based on innings
-        if innings == 1:
-            # First innings stats from batsman_runs
-            if player in match["batsman_runs"]:
-                bats = match["batsman_runs"][player]
-                runs = bats.get("runs", 0)
-                balls = bats.get("balls", 0)
-                fours = bats.get("fours", 0)
-                sixes = bats.get("sixes", 0)
-            else:
-                runs = balls = fours = sixes = 0
-        else:
-            # Second innings stats from ball_log
-            runs = balls = fours = sixes = 0
-            for ball in match["ball_log"]:
-                if ball["batsman"] == player and ball.get("innings") == 2:
-                    runs += ball["runs"]
-                    if not ball.get("extras"):
-                        balls += 1
-                    if ball["runs"] == 4:
-                        fours += 1
-                    elif ball["runs"] == 6:
-                        sixes += 1
-        
-        # Only show players who have batted (runs > 0 or balls > 0)
-        if runs > 0 or balls > 0:
-            # Find dismissal
-            dismissal = ""
-            is_out = False
-            
-            for d in match.get("dismissals", []):
-                if d["batsman"] == player and d.get("innings") == innings:
-                    is_out = True
-                    if d["dismissal_type"] == "Caught":
-                        dismissal = f"c {d['fielder']} b {d['bowler']}"
-                    elif d["dismissal_type"] == "Run Out":
-                        dismissal = f"run out ({d['fielder']})"
-                    elif d["dismissal_type"] == "Stumped":
-                        dismissal = f"st {d['fielder']} b {d['bowler']}"
-                    elif d["dismissal_type"] == "Bowled":
-                        dismissal = f"b {d['bowler']}"
-                    elif d["dismissal_type"] == "LBW":
-                        dismissal = f"lbw b {d['bowler']}"
-                    else:
-                        dismissal = d['dismissal_type'].lower()
-                    break
-            
-            if not is_out:
-                dismissal = "not out"
-            
-            batting_data.append({
-                "Batsman": player,
-                "Score": f"{runs}({balls})",
-                "4s": fours,
-                "6s": sixes,
-                "Dismissal": dismissal,
-                "is_out": is_out
-            })
-    
-    if batting_data:
-        # Create DataFrame
-        import pandas as pd
-        df_batting = pd.DataFrame(batting_data)
-        
-        # Create display dataframe without is_out column
-        df_display = df_batting.drop('is_out', axis=1).reset_index(drop=True)
-        
-        # Custom styling for not out batsmen (green highlight)
-        def highlight_not_out(row):
-            idx = row.name
-            if idx < len(df_batting) and not df_batting.iloc[idx]['is_out']:
-                return ['background-color: #e8f5e8'] * len(row)
-            return [''] * len(row)
-        
-        # Display table with styling
-        st.dataframe(
-            df_display.style.apply(highlight_not_out, axis=1),
-            width='stretch'
-        )
-    else:
-        st.info("No batting data available")
+        runs = balls = fours = sixes = 0
+
+        for ball in match.get("ball_log", []):
+            if ball["batsman"] == player and ball.get("innings") == innings:
+                runs += ball.get("runs", 0)
+                if not ball.get("extras"):
+                    balls += 1
+                if ball.get("runs", 0) == 4:
+                    fours += 1
+                elif ball.get("runs", 0) == 6:
+                    sixes += 1
+
+        dismissal = "not out"
+
+        for d in match.get("dismissals", []):
+            if d["batsman"] == player and d.get("innings") == innings:
+                dt = d.get("dismissal_type", "")
+                if dt == "Caught":
+                    dismissal = f"c {d.get('fielder', '')} b {d.get('bowler', '')}"
+                elif dt == "Run Out":
+                    dismissal = f"run out ({d.get('fielder', '')})"
+                elif dt == "Stumped":
+                    dismissal = f"st {d.get('fielder', '')} b {d.get('bowler', '')}"
+                elif dt == "Bowled":
+                    dismissal = f"b {d.get('bowler', '')}"
+                elif dt == "LBW":
+                    dismissal = f"lbw b {d.get('bowler', '')}"
+                else:
+                    dismissal = dt or "out"
+                break
+
+        batting_data.append({
+            "Batsman": player,
+            "Score": f"{runs}({balls})",
+            "4s": fours,
+            "6s": sixes,
+            "Dismissal": dismissal
+        })
+
+    df = pd.DataFrame(batting_data)
+
+    def highlight_not_out(row):
+        if row["Dismissal"] == "not out":
+            return ['background-color: #e8f5e8'] * len(row)
+        return [''] * len(row)
+
+    st.dataframe(
+        df.style.apply(highlight_not_out, axis=1),
+        width="stretch"
+    )
 
 
 def display_team_bowling(match, team_name, innings):
-    """Display bowling scorecard for a specific team and innings"""
-    st.markdown(f"<h4 style='color: #f57c00;'>🎳 Bowling Figures</h4>", unsafe_allow_html=True)
-    
-    # Get bowling team (opposite of batting team)
-    bowling_team = match["team2"] if team_name == match["team1"] else match["team1"]
+    import pandas as pd
+
+    st.markdown("<h4>🎳 Bowling Figures</h4>", unsafe_allow_html=True)
+
     bowlers = match["players2"] if team_name == match["team1"] else match["players1"]
-    
-    # Get bowler stats based on innings
-    bowler_stats = match.get("bowler_stats_first", match["bowler_stats"]) if innings == 1 else match["bowler_stats"]
-    
+
     bowling_data = []
+
     for bowler in bowlers:
-        if bowler in bowler_stats:
-            bowl = bowler_stats[bowler]
-            
-            # Calculate overs and balls for this bowler
-            if innings == 1:
-                # For first innings, use match overs/balls as approximation
-                overs = match.get("first_innings_overs", match["overs"])
-                balls = match.get("first_innings_balls", match["balls"])
-            else:
-                # For second innings, count from ball_log
-                overs = balls = 0
-                for ball in match["ball_log"]:
-                    if ball["bowler"] == bowler and ball.get("innings") == 2:
-                        if not ball.get("extras") or ball.get("extras") not in ["wide", "no_ball"]:
-                            balls += 1
-                overs = balls // 6
-                balls = balls % 6
-            
-            bowling_data.append({
-                "Bowler": bowler,
-                "O": f"{overs}.{balls}",
-                "M": 0,  # Maidens not tracked
-                "R": bowl.get("runs", 0),
-                "W": bowl.get("wickets", 0),
-                "Econ": f"{bowl.get('runs', 0)/(overs + balls/6):.1f}" if (overs + balls/6) > 0 else "0.0"
-            })
-    
-    if bowling_data:
-        import pandas as pd
-        df_bowling = pd.DataFrame(bowling_data)
-        st.dataframe(df_bowling, width='stretch')
-    else:
-        st.info("No bowling data available")
+        runs = wickets = balls = 0
+
+        for ball in match.get("ball_log", []):
+            if ball.get("bowler") == bowler and ball.get("innings") == innings:
+                runs += ball.get("runs", 0)
+                if ball.get("wicket"):
+                    wickets += 1
+                if not ball.get("extras"):
+                    balls += 1
+
+        overs = balls // 6
+        rem_balls = balls % 6
+        economy = round(runs / (overs + rem_balls / 6), 2) if balls > 0 else 0
+
+        bowling_data.append({
+            "Bowler": bowler,
+            "O": f"{overs}.{rem_balls}",
+            "R": runs,
+            "W": wickets,
+            "Econ": economy
+        })
+
+    df = pd.DataFrame(bowling_data)
+    st.dataframe(df, width="stretch")
 
 
 def scoring_ui():
@@ -237,8 +192,27 @@ def scoring_ui():
 
     st.divider()
 
+    if match["innings"] == 2 and not match.get("winner"):
+        target = match["first_innings_score"] + 1
+        runs_needed = target - match["score"]
+
+        balls_bowled = match["overs"] * 6 + match["balls"]
+        total_balls = match["total_overs"] * 6
+        balls_left = total_balls - balls_bowled
+
+        if balls_left > 0 and runs_needed > 0:
+            rrr = round((runs_needed / balls_left) * 6, 2)
+
+            st.markdown(f"""
+            <div style='background-color:#fff3cd;padding:12px;border-radius:10px;margin-top:10px'>
+                <b>🎯 Target:</b> {target} <br>
+                <b>🏃 Required:</b> {runs_needed} runs in {balls_left} balls <br>
+                <b>⚡ Required Run Rate:</b> {rrr}
+            </div>
+            """, unsafe_allow_html=True)
+
     # Second Innings Selection Interface
-    if match["innings"] == 2 and match["balls"] == 0 and match["overs"] == 0:
+    if match["innings"] == 2 and match["balls"] == 0 and match["overs"] == 0 and not match.get("second_innings_started"): 
         st.markdown("---")
         st.info(f"🎯 **Target: {match['first_innings_score'] + 1} runs**")
         st.markdown("---")
@@ -262,6 +236,7 @@ def scoring_ui():
             match["striker"] = new_striker
             match["non_striker"] = new_non_striker
             match["bowler"] = new_bowler
+            match["second_innings_started"] = True
             st.success(f"Second Innings Started! {match['striker']} and {match['non_striker']} to bat. {match['bowler']} to bowl.")
             st.rerun()
 
@@ -271,12 +246,16 @@ def scoring_ui():
     if "dismissal_details" not in st.session_state:
         st.session_state.dismissal_details = {}
 
-    def add_ball(run=0, extra=None, wicket=False, new_batsman=None, dismissal_type=None, fielder=None):
-        if wicket and new_batsman:
-            # Record dismissal details before changing striker
+    def add_ball(run=0, extra=None, wicket=False, new_batsman=None, dismissal_type=None, fielder=None,new_batsman_position="Striker"):
+        current_batsman = match["striker"]
+        current_bowler = match["bowler"]
+        out_batsman = None
+        if wicket:
+            # Record dismissal details
             if dismissal_type:
+                out_batsman = match["striker"] if new_batsman is None or new_batsman_position == "Striker" else match["non_striker"]
                 dismissal_record = {
-                    "batsman": match["striker"],  # The striker got out
+                    "batsman": out_batsman,
                     "bowler": match["bowler"],
                     "dismissal_type": dismissal_type,
                     "fielder": fielder,
@@ -286,7 +265,11 @@ def scoring_ui():
                     match["dismissals"] = []
                 match["dismissals"].append(dismissal_record)
             
-            match["striker"] = new_batsman
+            if new_batsman:
+                if new_batsman_position == "Striker":
+                    match["striker"] = new_batsman
+                else:
+                    match["non_striker"] = new_batsman
             st.session_state.wicket_pending = False
             st.session_state.dismissal_details = {}
 
@@ -310,13 +293,13 @@ def scoring_ui():
             match["overs"] += 1
             match["balls"] = 0
             match["over_details"].append([])
+            # ✅ Rotate strike at end of over
+            match["striker"], match["non_striker"] = match["non_striker"], match["striker"]
 
         if wicket:
             match["wickets"] += 1
 
-        # Strike rotation
-        if run in [1, 3, 5] or wicket:
-            match["striker"], match["non_striker"] = match["non_striker"], match["striker"]
+        
 
         # Update over details
         if extra:
@@ -340,8 +323,8 @@ def scoring_ui():
             match["over_runs"][over_num] += run
 
         match["ball_log"].append({
-            "batsman": match["striker"],  # Always the striker faced the ball
-            "bowler": match["bowler"],
+            "batsman": current_batsman,  # Always the striker faced the ball
+            "bowler": current_bowler,
             "runs": run,
             "extras": extra,
             "wicket": wicket,
@@ -349,11 +332,14 @@ def scoring_ui():
             "over": over,
             "innings": match["innings"],
             "dismissal_type": dismissal_type,
-            "fielder": fielder
+            "fielder": fielder,
+            "out_batsman": out_batsman
         })
-
+        # Strike rotation
+        if run in [1, 3, 5]:
+            match["striker"], match["non_striker"] = match["non_striker"], match["striker"]
         # Update batsman runs with sixes and fours tracking
-        batsman = match["ball_log"][-1]["batsman"]  # Always the striker
+        batsman = current_batsman  # Always the striker
         if batsman not in match["batsman_runs"]:
             match["batsman_runs"][batsman] = {"runs": 0, "sixes": 0, "fours": 0, "balls": 0}
         match["batsman_runs"][batsman]["runs"] += run
@@ -365,7 +351,7 @@ def scoring_ui():
             match["batsman_runs"][batsman]["fours"] += 1
         
         # Update bowler stats
-        bowler = match["bowler"]
+        bowler = current_bowler
         if bowler not in match["bowler_stats"]:
             match["bowler_stats"][bowler] = {"runs": 0, "wickets": 0}
         match["bowler_stats"][bowler]["runs"] += run
@@ -396,7 +382,7 @@ def scoring_ui():
                 match["batsman_runs"] = {}
                 match["bowler_stats"] = {}
                 match["over_runs"] = {}
-                match["dismissals"] = []
+                # Keep dismissals from first innings; do not clear match['dismissals']
                 st.success("Second Innings Started")
             else:
                 # Match end
@@ -409,10 +395,16 @@ def scoring_ui():
                 st.rerun()  # To show winner
 
     # Bowler selection per over
+    # Bowler selection per over (skip first over of 2nd innings)
     if match["balls"] == 0:
-        bowler_options = [p for p in match["bowling_team"]]
-        selected_bowler = st.selectbox("Select Bowler for this Over", bowler_options, key=f"bowler_{match['overs']}")
-        match["bowler"] = selected_bowler
+        if not (match["innings"] == 2 and not match.get("second_innings_started")):
+            bowler_options = [p for p in match["bowling_team"]]
+            selected_bowler = st.selectbox(
+                "Select Bowler for this Over",
+                bowler_options,
+                key=f"bowler_{match['overs']}_{match['innings']}"
+            )
+            match["bowler"] = selected_bowler
 
     # BUTTON GRID
     cols = st.columns(6)
@@ -459,9 +451,9 @@ def scoring_ui():
         
         if remaining_players:
             new_batsman = st.selectbox("Select New Batsman", remaining_players, key="new_batsman")
-            
+            batting_position = st.radio("New batsman will be:",["Striker", "Non-Striker"],key="batting_position")
             if st.button("Confirm Wicket", key="confirm_wicket"):
-                add_ball(wicket=True, new_batsman=new_batsman, dismissal_type=dismissal_type, fielder=fielder)
+                add_ball(wicket=True, new_batsman=new_batsman, dismissal_type=dismissal_type, fielder=fielder,new_batsman_position=batting_position)
                 st.rerun()
         else:
             st.warning("No more batsmen available")
@@ -595,9 +587,10 @@ def scoring_ui():
             if last["wicket"]:
                 match["wickets"] -= 1
                 # Remove dismissal record
+                out_batsman = last.get("out_batsman", last["batsman"])
                 if "dismissals" in match:
-                    match["dismissals"] = [d for d in match["dismissals"] if not (d["batsman"] == last["batsman"] and d["bowler"] == last["bowler"] and d.get("innings") == last.get("innings"))]
-                # Restore striker (the batsman who got out becomes striker again)
+                    match["dismissals"] = [d for d in match["dismissals"] if not (d["batsman"] == out_batsman and d["bowler"] == last["bowler"] and d.get("innings") == last.get("innings"))]
+                # Restore striker (the batsman who faced the ball becomes striker again)
                 match["striker"] = last["batsman"]
             # Revert balls only if it wasn't an extra
             if not last.get("extras"):

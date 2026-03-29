@@ -61,6 +61,7 @@ def setup_match_ui():
             "batsman_runs": {},
             "bowler_stats": {},
             "over_runs": {},
+            "second_innings_started": False,
             "dismissals": []
         }
         st.session_state.menu = "Live Scoring"
