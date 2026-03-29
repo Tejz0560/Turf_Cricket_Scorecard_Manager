@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+pandas
+streamlit
+python-dotenv
+plotly
+matplotlib
+requests
+python-multipart
+altair==4.2.2
