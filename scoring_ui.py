@@ -108,7 +108,6 @@ def display_team_batting(match, team_name, innings):
         width="stretch"
     )
 
-
 def display_team_bowling(match, team_name, innings):
     import pandas as pd
 
